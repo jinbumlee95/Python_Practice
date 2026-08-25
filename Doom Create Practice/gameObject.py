@@ -137,9 +137,9 @@ class Wall():
         right_x = math.cos(rad)
         right_y = math.sin(rad)
 
-        # hero가 보는 방향 기준의 앞쪽 벡터다. rotate=0일 때 위쪽을 바라보게 맞춘다.
-        forward_x = math.sin(rad)
-        forward_y = -math.cos(rad)
+        # hero가 보는 방향 기준의 앞쪽 벡터다. rotate=0일 때 위쪽을 바라보게 -90도 보정한다.
+        forward_x = math.cos(rad - math.pi / 2)
+        forward_y = math.sin(rad - math.pi / 2)
 
         def to_screen(point) :
             # 벽 꼭짓점의 월드 좌표에서 hero 월드 중심을 빼서 hero 기준 상대 위치로 만든다.
