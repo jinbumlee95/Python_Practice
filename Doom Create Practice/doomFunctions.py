@@ -101,9 +101,11 @@ def render_objects() :
     # 렌더링 할 벽 선택 후 추가.
     for wall in Maps.walls :
         new_wall = gameObject.Wall(*wall,screen)
-        for mini_wall in new_wall.get_mini_walls() :
-            if check_render_distance_walls(hero, mini_wall) :
-                render_wall_list.append(mini_wall)
+        if check_render_distance_walls(hero, new_wall) :
+            render_wall_list.append(new_wall)
+        # for mini_wall in new_wall.get_mini_walls() :
+        #     if check_render_distance_walls(hero, mini_wall) :
+        #         render_wall_list.append(mini_wall)
 
     for wall in render_wall_list :
         wall.show(hero)
