@@ -1,17 +1,17 @@
 import pygame
 import gameObject
 
-
-raser_list = []
-enemy_list = []
-screen = None
-hero = None
 dt = 0.01
 color2 = (5, 0, 16)
 
 def init(main_screen) :
     global screen
     global hero
+    global raser_list
+    global enemy_list
+    
+    raser_list = []
+    enemy_list = []
     screen = main_screen
     screen.fill(color2)
     hero = gameObject.Hero(screen)

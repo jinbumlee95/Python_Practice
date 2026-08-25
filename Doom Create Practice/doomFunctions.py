@@ -1,12 +1,8 @@
 import pygame
 import math
 import gameObject
+import Maps
 
-
-raser_list = []
-enemy_list = []
-screen = None
-hero = None
 dt = 0.01
 color2 = (5, 0, 16)
 
@@ -14,6 +10,10 @@ def init(main_screen) :
     global screen
     global hero
     global enemy_list
+    global render_wall_list
+    
+    render_wall_list = []
+    enemy_list = []
     screen = main_screen
     screen.fill(color2)
     hero = gameObject.Hero(screen)
@@ -21,6 +21,9 @@ def init(main_screen) :
     enemy1 = gameObject.Enemy(screen)
     enemy_list.append(enemy1)
 
+def get_Hero() :
+    global hero
+    return hero
 
 
 def spwan_enenmy() :
@@ -29,16 +32,9 @@ def spwan_enenmy() :
 
 def move_enemy():
     global enemy_list
-    global raser_list
     
     for enemy in enemy_list : 
         enemy.y += 400 * dt
-        for raser in raser_list :
-            if raser.is_alive and enemy.is_alive: 
-                enemy.is_alive = find_col(enemy,raser)# 충돌시 레이저와 적을 둘다 지워야함
-                raser.is_alive = find_col(enemy,raser)# 충돌시 레이저와 적을 둘다 지워야함
-                if not enemy.is_alive :
-                    break
             
     
 
@@ -86,10 +82,11 @@ def move_hero() :
         
     
 def render_objects() :
-    global raser_list
     global enemy_list
     global hero
-
+    global screen
+    global render_wall_list
+    
     screen.fill(color2)
     
     
@@ -97,12 +94,23 @@ def render_objects() :
     ## 거리 계산
     
     enemy_list = [enemy for enemy in enemy_list if  enemy.is_alive]
-    render_enemy_list = [ enemy for enemy in enemy_list if check_render_distance(hero,enemy)]
+    render_enemy_list = [ enemy for enemy in enemy_list if check_render_distance_object(hero,enemy)]
+
+    render_wall_list = []
     
+    # 렌더링 할 벽 선택 후 추가.
+    for wall in Maps.walls :
+        new_wall = gameObject.Wall(*wall,screen)
+        for mini_wall in new_wall.get_mini_walls() :
+            if check_render_distance_walls(hero, mini_wall) :
+                render_wall_list.append(mini_wall)
+
+    for wall in render_wall_list :
+        wall.show(hero)
+        
     for enemy in render_enemy_list :
         enemy.show()
-    for raser in raser_list :
-        raser.show()
+    
 
     hero.show()
     
@@ -112,7 +120,7 @@ def game_end() :
     global hero
     return not hero.is_alive
 
-def check_render_distance(hero,enemy) :
+def check_render_distance_object(hero,enemy) :
     #거리 체크 (이미 시야 거리 바깥이면 빠르게 False 반환)
     enemy_pos = enemy.get_center()
     hero_pos = hero.get_center()
@@ -139,4 +147,45 @@ def check_render_distance(hero,enemy) :
 
 
 
+def check_render_distance_walls(hero,wall) :
+    defualt = False
+    #거리 체크 (이미 시야 거리 바깥이면 빠르게 False 반환    
+    hero_pos = hero.get_center()
+
+    rel_list = []
+    
+    for d in wall.get_point_list() :
+        dist = math.dist(d, hero_pos) # 벽의 각 점이랑 hero 의 거리를 계산.
+        rel_list.append(  ((d[0] - hero_pos[0]) / dist , (d[1] - hero_pos[1]) / dist ) )  # 상대적 위치를 미리 계산해서 처리해
+        if dist < hero.v_distance and dist != 0: 
+            defualt = True
+        
+    if not defualt :
+        return defualt # 1차 거리 계산후에 해당하지 않는다면, 즉시 반환
+
+    
+    #  상대 적인 위치를 계산 한 후 상대 위치 저장
+    # rel_x = (d[0] - hero_pos[0]) / dist
+    # rel_y = (d[1] - hero_pos[1]) / dist
+
+    # 캐릭터가 바라보고 있는 방향에 대해서 단위 벡터 생성( sin^2 + cos^2 = 1 이니까 )
+    facing_x = math.cos(math.radians(hero.rotate-90)) # 정면을 0 이라고 해서 90도 보정
+    facing_y = math.sin(math.radians(hero.rotate-90))
+
+    # 상대적  위치랑 내 시야 랑 내적함
+    #dot = rel_x * facing_x + rel_y * facing_y
+    # dot를 개별 에서 전체 보유 리스트를 전부 체크 하고, 최솟값을 리턴 하도록 수정 한것
+    dot = max(list( map( lambda x : get_product(x,(facing_x,facing_y)) ,   rel_list ))) 
+    
+    # 그 값이 내 vision cos 값 보다 작으면 시야 안에 있는거임
+    min_cos_val = math.cos(math.radians(hero.vision)) # cos(radians(60)) -> 0.5
+
+
+    
+
+    return dot >= min_cos_val
+    
+def get_product(v1, v2) :
+    return v1[0]*v2[0] + v1[1]*v2[1]
+    
     

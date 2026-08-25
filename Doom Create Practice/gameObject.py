@@ -1,5 +1,6 @@
 import pygame
 import random
+import math
 
 class game_Object : 
     def __init__(self,main_screen) : 
@@ -17,7 +18,6 @@ class game_Object :
         self.image = pygame.transform.scale(self.image, (w, h))
         return self
 
-    
     
     def show(self) :
         self.screen.blit(self.image, (self.x,self.y))
@@ -40,6 +40,9 @@ class Hero(game_Object) :
         self.vision = 60 # 정면 120도를 본다 (절반씩 더하고 뺀다?)
         self.v_distance = 700 # 최대 인식 거리
 
+        self.render_x = self.screen.get_width() / 2 - self.image.get_size()[0]
+        self.render_y = self.screen.get_height() - self.image.get_size()[1]
+
         # 이미지를 계속 회전 시키면 깨지니까, 저장해두고 회전후 세팅할 이미지 하나
         self.orig_image = self.image.copy()
 
@@ -57,6 +60,9 @@ class Hero(game_Object) :
 
         return self
 
+    def show(self) :
+        self.screen.blit(self.image, (self.render_x,self.render_y))
+
 class Enemy(game_Object) : 
     def __init__(self,main_screen) : 
         super().__init__(main_screen)
@@ -66,4 +72,96 @@ class Enemy(game_Object) :
 
         
         
-    
+
+class Wall():
+    def __init__(self,x,y,w,h,main_screen) :
+        self.x = x 
+        self.y = y
+        self.w = w
+        self.h = h
+        self.screen = main_screen
+        
+    def get_pos(self) :
+        return (self.x,self.y)
+
+    def get_posx(self) :
+        return (self.x+self.w,self.y)
+
+    def get_posy(self) :
+        return (self.x,self.y+self.h)
+
+    def get_posxy(self) :
+        return (self.x+self.w,self.y+self.h)
+        
+    def get_center(self) :
+        return (self.x + self.w/2  ,self.y + self.h/2 )
+
+    def get_point_list(self) :
+        point_list = []
+        for i in range(self.x, self.x + self.w , 100) :
+            for j in range(self.y , self.y + self.h,100) :
+                point_list.append( (i,j) ) 
+        return point_list
+
+    def get_mini_walls(self) :
+        list_mini_walls = []
+        mini_size = 100
+
+        if self.w >= self.h:
+            for i in range(self.x, self.x + self.w, mini_size) :
+                mini_w = min(mini_size, self.x + self.w - i)
+                list_mini_walls.append(Wall(i, self.y, mini_w, self.h, self.screen))
+        else:
+            for j in range(self.y, self.y + self.h, mini_size) :
+                mini_h = min(mini_size, self.y + self.h - j)
+                list_mini_walls.append(Wall(self.x, j, self.w, mini_h, self.screen))
+
+        return list_mini_walls
+
+    # 벽그리기.. .. 회전이 필요하다.
+    def show(self,hero) :
+        # 일단 사각형으로 그리는건 성공
+        #pygame.draw.rect(self.screen,(255,255,255), pygame.Rect(hero.render_x + (self.x - hero.x), hero.render_y + (self.y - hero.y), self.w, self.h))
+        
+        # hero의 월드 중심점: 벽을 hero 기준 상대좌표로 바꿀 때 기준점으로 쓴다.
+        hero_center_x, hero_center_y = hero.get_center()
+
+        # hero의 화면 렌더 중심점: 상대좌표 계산이 끝난 벽을 화면에 다시 얹는 기준점이다.
+        hero_render_center_x = hero.render_x
+        hero_render_center_y = hero.render_y
+
+        # 삼각함수는 degree가 아니라 radian을 받기 때문에 rotate 값을 변환한다.
+        rad = math.radians(hero.rotate)
+
+        # hero가 보는 방향 기준의 오른쪽 벡터다. 화면 좌우 위치 계산에 쓴다.
+        right_x = math.cos(rad)
+        right_y = math.sin(rad)
+
+        # hero가 보는 방향 기준의 앞쪽 벡터다. rotate=0일 때 위쪽을 바라보게 맞춘다.
+        forward_x = math.sin(rad)
+        forward_y = -math.cos(rad)
+
+        def to_screen(point) :
+            # 벽 꼭짓점의 월드 좌표에서 hero 월드 중심을 빼서 hero 기준 상대 위치로 만든다.
+            rel_x = point[0] - hero_center_x
+            rel_y = point[1] - hero_center_y
+
+            # 상대 위치가 hero의 오른쪽 방향으로 얼마나 떨어져 있는지 계산한다.
+            view_x = rel_x * right_x + rel_y * right_y
+
+            # 상대 위치가 hero의 앞쪽 방향으로 얼마나 떨어져 있는지 계산한다.
+            view_y = rel_x * forward_x + rel_y * forward_y
+
+            # view_x는 화면 오른쪽이 +라서 더하고, view_y는 앞쪽을 화면 위로 보이게 하려고 뺀다.
+            return (int(hero_render_center_x + view_x),
+                    int(hero_render_center_y - view_y))
+
+        # 벽의 네 꼭짓점을 각각 hero 기준 화면 좌표로 변환한다.
+        p1 = to_screen(self.get_pos())
+        p2 = to_screen(self.get_posx())
+        p3 = to_screen(self.get_posy())
+        p4 = to_screen(self.get_posxy())
+
+        # 잘 그려지면 좋겠다.
+        pygame.draw.polygon(self.screen,(255,255,255), (p1,p2,p4,p3) )
+        
