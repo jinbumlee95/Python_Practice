@@ -63,8 +63,8 @@ def find_col(obj1, obj2) :
     y_obj2_end = (obj2.y + obj2.image.get_size()[1])
 
     ## case x-axis 
-    check_x = (obj1.x >= obj2.x and x_obj2_end >= obj1.x ) or (obj2.x >= obj1.x and x_obj1_end >= obj2.x ) ## x 값이 서로의 구간 안에 겹친다면
-    check_y = (obj1.y >= obj2.y and y_obj2_end >= obj1.y ) or (obj2.y >= obj1.y and y_obj1_end >= obj2.y ) ## y 값이 서로의 구간 안에 겹친다면
+    check_x = (obj1.x >= obj2.x and obj1.x <= x_obj2_end ) or (obj2.x >= obj1.x and obj2.x <= x_obj1_end  ) ## x 값이 서로의 구간 안에 겹친다면
+    check_y = (obj1.y >= obj2.y and obj1.y <= y_obj2_end ) or (obj2.y >= obj1.y and  obj2.y <= y_obj1_end ) ## y 값이 서로의 구간 안에 겹친다면
     
 
     return not (check_x and check_y) # 둘다 해당 해야함 > 사망 처리를 위해 False 리턴

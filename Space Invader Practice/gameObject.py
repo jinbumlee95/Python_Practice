@@ -33,7 +33,8 @@ class Hero(game_Object) :
         self.set_img('pyGame/hero2.png').change_size(30,30)   
         self.x = self.screen.get_width() / 2 - self.image.get_size()[0]
         self.y = self.screen.get_height() - 80 # 초기 세팅
-        
+
+    
 
 
 class Raser(game_Object) : 

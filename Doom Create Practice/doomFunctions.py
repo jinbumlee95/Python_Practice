@@ -3,7 +3,7 @@ import math
 import gameObject
 import Maps
 
-dt = 0.01
+dt = 0.05
 color2 = (5, 0, 16)
 
 def init(main_screen) :
@@ -11,15 +11,17 @@ def init(main_screen) :
     global hero
     global enemy_list
     global render_wall_list
+    global closest_wall_list
     
     render_wall_list = []
+    closest_wall_list = []
     enemy_list = []
     screen = main_screen
     screen.fill(color2)
     hero = gameObject.Hero(screen)
 
-    enemy1 = gameObject.Enemy(screen)
-    enemy_list.append(enemy1)
+    #enemy1 = gameObject.Enemy(screen)
+    #enemy_list.append(enemy1)
 
 def get_Hero() :
     global hero
@@ -54,28 +56,43 @@ def find_col(obj1, obj2) :
 
     return not (check_x and check_y) # 둘다 해당 해야함 > 사망 처리를 위해 False 리턴
 
+
+
 # 화면 전환을 각도로 처리하기 위해서는, 캐릭터가 직선으로 움직이는게 아니라, 보고있는 방향으로 움직여야 한다
 # Hero class 에서 저장해둔 현재 바라보는 방향 rotate 를 기준으로 x,y 를 움직이는데,
 # 통상적인 좌표 환경에서는 x 축이 좌우, y축이 앞 뒤인데, 이는 0도가 x 축이기 때문.
 # 이 상황을 뒤집으려면 > 90도 shift  sin cos 반대로 쓰기 > 인데 cos은 우함수 >> y만 반대로 써야 함  (-sin)
 def move_hero() :
     global hero
+
+    hero.x_before = hero.x # 이동 전 기존 위치
+    hero.y_before = hero.y # 이동 전 기존 위치
+
+    
     keys = pygame.key.get_pressed()
     if keys[pygame.K_UP]:
         hero.x += 400 * dt * math.sin(math.radians(hero.rotate))  
+        check_hero_collect_position(hero,'x') 
         hero.y -= 400 * dt * math.cos(math.radians(hero.rotate)) # y 방향이 아래가 + 라서 -sin 
+        check_hero_collect_position(hero,'y') 
     if keys[pygame.K_DOWN]:
         hero.x -= 400 * dt * math.sin(math.radians(hero.rotate))
+        check_hero_collect_position(hero,'x') 
         hero.y += 400 * dt * math.cos(math.radians(hero.rotate))
+        check_hero_collect_position(hero,'y') 
     if keys[pygame.K_LEFT]:
-        hero.rotate -= 400 * dt
+        hero.rotate -= 400 * dt * 0.2
         if hero.rotate <= 0 :
            hero.rotate = 360 + hero.rotate
     if keys[pygame.K_RIGHT]:
-        hero.rotate += 400 * dt
+        hero.rotate += 400 * dt * 0.2
         hero.rotate = hero.rotate % 360
-        
-    hero.rotate_head()
+
+    
+    
+    
+    #hero.rotate_head() # 현재 hero 가 보고 있는 방향으로 머리 돌려주는거
+    # 지도 같은게 필요하면 이거 쓰면 됨
     # for enemy in enemy_list : 
     #     if hero.is_alive:
     #         hero.is_alive = find_col(enemy,hero)
@@ -86,18 +103,28 @@ def render_objects() :
     global hero
     global screen
     global render_wall_list
+    global closest_wall_list
     
     screen.fill(color2)
     
-    
-
     ## 거리 계산
     
     enemy_list = [enemy for enemy in enemy_list if  enemy.is_alive]
     render_enemy_list = [ enemy for enemy in enemy_list if check_render_distance_object(hero,enemy)]
 
-    render_wall_list = []
+
+    # 플레이어로 부터 가까운 별 목록을 추가
+    closest_wall_list =[]
+
+    for wall in Maps.walls :
+        new_wall = gameObject.Wall(*wall,screen)
+        if check_closest_walls(hero, new_wall) :
+            closest_wall_list.append(new_wall)
+
     
+
+    
+    render_wall_list = []
     # 렌더링 할 벽 선택 후 추가.
     for wall in Maps.walls :
         new_wall = gameObject.Wall(*wall,screen)
@@ -105,8 +132,10 @@ def render_objects() :
             render_wall_list.append(new_wall)
         # for mini_wall in new_wall.get_mini_walls() :
         #     if check_render_distance_walls(hero, mini_wall) :
-        #         render_wall_list.append(mini_wall)
+        #         render_wall_list.append(mini_wall) # 작은 벽으로 나눠서 그리기 이것도 쓸곳이 있을지도
 
+    
+    
     for wall in render_wall_list :
         wall.show(hero)
         
@@ -142,7 +171,7 @@ def check_render_distance_object(hero,enemy) :
     # 상대적  위치랑 내 시야 랑 내적함
     dot = rel_x * facing_x + rel_y * facing_y
 
-    # 그 값이 내 vision cos 값 보다 작으면 시야 안에 있는거임
+    # 그 값이 내 vision cos 값 보다 크면 시야 안에 있는거임
     min_cos_val = math.cos(math.radians(hero.vision)) # cos(radians(60)) -> 0.5
 
     return dot >= min_cos_val
@@ -150,7 +179,7 @@ def check_render_distance_object(hero,enemy) :
 
 
 def check_render_distance_walls(hero,wall) :
-    defualt = False
+    default = False
     #거리 체크 (이미 시야 거리 바깥이면 빠르게 False 반환    
     hero_pos = hero.get_center()
 
@@ -158,12 +187,13 @@ def check_render_distance_walls(hero,wall) :
     
     for d in wall.get_point_list() :
         dist = math.dist(d, hero_pos) # 벽의 각 점이랑 hero 의 거리를 계산.
-        rel_list.append(  ((d[0] - hero_pos[0]) / dist , (d[1] - hero_pos[1]) / dist ) )  # 상대적 위치를 미리 계산해서 처리해
+        rel_list.append(  ((d[0] - hero_pos[0]) / dist , (d[1] - hero_pos[1]) / dist ) )  
+        # 상대적 위치를 미리 계산해서 처리해
         if dist < hero.v_distance and dist != 0: 
-            defualt = True
+            default = True # 일단 점이 하나라도 있으면 처리되어야 하니까..
         
-    if not defualt :
-        return defualt # 1차 거리 계산후에 해당하지 않는다면, 즉시 반환
+    if not default :
+        return default # 1차 거리 계산후에 해당하지 않는다면, 즉시 반환
 
     
     #  상대 적인 위치를 계산 한 후 상대 위치 저장
@@ -176,10 +206,10 @@ def check_render_distance_walls(hero,wall) :
 
     # 상대적  위치랑 내 시야 랑 내적함
     #dot = rel_x * facing_x + rel_y * facing_y
-    # dot를 개별 에서 전체 보유 리스트를 전부 체크 하고, 최솟값을 리턴 하도록 수정 한것
+    # dot를 개별 에서 전체 보유 리스트를 전부 체크 하고, 최댓값을 리턴 하도록 수정 한것
     dot = max(list( map( lambda x : get_product(x,(facing_x,facing_y)) ,   rel_list ))) 
     
-    # 그 값이 내 vision cos 값 보다 작으면 시야 안에 있는거임
+    # 그 값이 내 vision cos 값 보다 크면 시야 안에 있는거임
     min_cos_val = math.cos(math.radians(hero.vision)) # cos(radians(60)) -> 0.5
 
 
@@ -187,7 +217,74 @@ def check_render_distance_walls(hero,wall) :
 
     return dot >= min_cos_val
     
+def check_closest_walls(hero,wall):
+
+    default = False 
+    hero_pos = hero.get_center()
+    
+    for d in wall.get_point_list() :
+        dist = math.dist(d, hero_pos) # 벽의 각 점이랑 hero 의 거리를 계산. 
+        #(hero 사이즈 크기의 2배 정도 되는 거리의 벽은 다 가져온다)
+        if dist < max(hero.image.get_size())*2 and dist != 0: 
+            default = True
+            break;
+        
+    return default
+    
 def get_product(v1, v2) :
     return v1[0]*v2[0] + v1[1]*v2[1]
+
+
+def check_hero_collect_position(hero,axis) :
+    global closest_wall_list
+
+    if axis == 'x':
+        for wall in closest_wall_list :
+            # 일단 둘다 인 상황인데? x 제어
+            if find_col_wall(hero,wall): 
+                hero.x = hero.x_before
+                
+    else :
+        for wall in closest_wall_list :
+            # 일단 둘다 인 상황인데? y 제어
+            if find_col_wall(hero,wall): 
+                hero.y = hero.y_before
+                
+        
+            
     
+
+
+def find_col_wall(hero, wall) : 
+    
+    hero_pos = hero.get_center()
+    radius = hero.radius
+    
+    closest_point_x = 0
+
+    if hero_pos[0] <= min(wall.get_pos()[0], wall.get_posxy()[0])  :
+        closest_point_x = min(wall.get_pos()[0], wall.get_posxy()[0])
+    elif hero_pos[0] >= max(wall.get_pos()[0], wall.get_posxy()[0]) :
+        closest_point_x = max(wall.get_pos()[0], wall.get_posxy()[0])
+    else :
+        closest_point_x = hero_pos[0]
+
+    closest_point_y = 0 
+    
+    if hero_pos[1] <= min(wall.get_pos()[1], wall.get_posxy()[1])  :
+        closest_point_y = min(wall.get_pos()[1], wall.get_posxy()[1])
+    elif hero_pos[1] >= max(wall.get_pos()[1], wall.get_posxy()[1]) :
+        closest_point_y = max(wall.get_pos()[1], wall.get_posxy()[1])
+    else :
+        closest_point_y = hero_pos[0]
+
+    
+    # 제일 가까운 점 을 구했음
+
+    # 이제 이 점과 hero 의 중심사이의 거리가 math.dist(d, hero_pos) , radius 보다 작은지 보면됨
+
+
+    # 되긴 되는데, 특정 벽은 의도 한 대로 막히는데
+    # 또 어떤 벽은 의도대로 안막히는 사항이 있음. 이유가 뭘까? > 집에가서 추가 적인 고민을 해보자.
+    return math.dist((closest_point_x,closest_point_y), hero_pos) <= radius
     

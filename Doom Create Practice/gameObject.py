@@ -39,10 +39,11 @@ class Hero(game_Object) :
         self.rotate = 0 % 360  # 각도 처리(360도 기준)
         self.vision = 60 # 정면 120도를 본다 (절반씩 더하고 뺀다?)
         self.v_distance = 700 # 최대 인식 거리
+        self.radius = self.image.get_size()[0]/2 # 반경
 
         self.render_x = self.screen.get_width() / 2 - self.image.get_size()[0]
         self.render_y = self.screen.get_height() - self.image.get_size()[1]
-
+        
         # 이미지를 계속 회전 시키면 깨지니까, 저장해두고 회전후 세팅할 이미지 하나
         self.orig_image = self.image.copy()
 
@@ -61,7 +62,8 @@ class Hero(game_Object) :
         return self
 
     def show(self) :
-        self.screen.blit(self.image, (self.render_x,self.render_y))
+        #self.screen.blit(self.image, (self.render_x,self.render_y))
+        pygame.draw.circle(self.screen, 'red', (self.render_x,self.render_y), self.radius)
 
 class Enemy(game_Object) : 
     def __init__(self,main_screen) : 
@@ -133,11 +135,11 @@ class Wall():
         # 삼각함수는 degree가 아니라 radian을 받기 때문에 rotate 값을 변환한다.
         rad = math.radians(hero.rotate)
 
-        # hero가 보는 방향 기준의 오른쪽 벡터다. 화면 좌우 위치 계산에 쓴다.
+        # hero기준의 회전 방향 (x axis)
         right_x = math.cos(rad)
         right_y = math.sin(rad)
 
-        # hero가 보는 방향 기준의 앞쪽 벡터다. rotate=0일 때 위쪽을 바라보게 -90도 보정한다.
+        # hero의 논리적 y축 ( hero.rotate == 0  일때 y-axis 인 계산)
         forward_x = math.cos(rad - math.pi / 2)
         forward_y = math.sin(rad - math.pi / 2)
 
