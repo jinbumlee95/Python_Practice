@@ -38,7 +38,7 @@ class Hero(game_Object) :
         self.y = self.screen.get_height() - self.image.get_size()[1] # 초기 세팅
         self.rotate = 0 % 360  # 각도 처리(360도 기준)
         self.vision = 60 # 정면 120도를 본다 (절반씩 더하고 뺀다?)
-        self.v_distance = 700 # 최대 인식 거리
+        self.v_distance = 1200 # 최대 인식 거리
         self.radius = self.image.get_size()[0]/2 # 반경
 
         self.render_x = self.screen.get_width() / 2 - self.image.get_size()[0]
@@ -66,15 +66,49 @@ class Hero(game_Object) :
         pygame.draw.circle(self.screen, 'red', (self.render_x,self.render_y), self.radius)
 
 class Enemy(game_Object) : 
-    def __init__(self,main_screen) : 
+    def __init__(self,main_screen,x = 0 ,y = 0) : 
         super().__init__(main_screen)
         self.set_img('images/enemy.png').change_size(30,30)
-        self.x = random.randint(60,self.screen.get_width() - self.image.get_size()[0])
-        self.y = random.randint(20,100)
+        self.x = x
+        self.y = y
 
+
+    def show(self,hero) :
+        # hero의 월드 중심점: 벽을 hero 기준 상대좌표로 바꿀 때 기준점으로 쓴다.
+        hero_center_x, hero_center_y = hero.get_center()
+
+        # hero의 화면 렌더 중심점: 상대좌표 계산이 끝난 벽을 화면에 다시 얹는 기준점이다.
+        hero_render_center_x = hero.render_x
+        hero_render_center_y = hero.render_y
+
+        # 삼각함수는 degree가 아니라 radian을 받기 때문에 rotate 값을 변환한다.
+        rad = math.radians(hero.rotate)
+
+        # hero기준의 회전 방향 (x axis)
+        right_x = math.cos(rad)
+        right_y = math.sin(rad)
+
+        # hero의 논리적 y축 ( hero.rotate == 0  일때 y-axis 인 계산)
+        forward_x = math.cos(rad - math.pi / 2)
+        forward_y = math.sin(rad - math.pi / 2)
+
+        def to_screen(point) :
+            rel_x = point[0] - hero_center_x
+            rel_y = point[1] - hero_center_y
+
+            # 상대 위치가 hero의 오른쪽 방향으로 얼마나 떨어져 있는지 계산한다.
+            view_x = rel_x * right_x + rel_y * right_y
+
+            # 상대 위치가 hero의 앞쪽 방향으로 얼마나 떨어져 있는지 계산한다.
+            view_y = rel_x * forward_x + rel_y * forward_y
+
+            # view_x는 화면 오른쪽이 +라서 더하고, view_y는 앞쪽을 화면 위로 보이게 하려고 뺀다.
+            return (int(hero_render_center_x + view_x),
+                    int(hero_render_center_y - view_y))
+        
+        self.screen.blit( self.image, to_screen(self.get_pos()) )
         
         
-
 class Wall():
     def __init__(self,x,y,w,h,main_screen) :
         self.x = x 
@@ -123,7 +157,6 @@ class Wall():
     # 벽그리기.. .. 회전이 필요하다.
     def show(self,hero) :
         # 일단 사각형으로 그리는건 성공
-        #pygame.draw.rect(self.screen,(255,255,255), pygame.Rect(hero.render_x + (self.x - hero.x), hero.render_y + (self.y - hero.y), self.w, self.h))
         
         # hero의 월드 중심점: 벽을 hero 기준 상대좌표로 바꿀 때 기준점으로 쓴다.
         hero_center_x, hero_center_y = hero.get_center()

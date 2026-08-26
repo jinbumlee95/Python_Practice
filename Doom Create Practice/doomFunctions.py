@@ -11,17 +11,26 @@ def init(main_screen) :
     global hero
     global enemy_list
     global render_wall_list
-    global closest_wall_list
+    global wall_list
+    global hud_font
     
     render_wall_list = []
-    closest_wall_list = []
     enemy_list = []
     screen = main_screen
     screen.fill(color2)
     hero = gameObject.Hero(screen)
+    hud_font = pygame.font.SysFont(None, 22)
 
-    #enemy1 = gameObject.Enemy(screen)
-    #enemy_list.append(enemy1)
+    wall_list = []
+    for wall in Maps.walls :
+        new_wall = gameObject.Wall(*wall,screen)
+        wall_list.append(new_wall)
+
+    for e in Maps.enemy_spawns :
+        enemy = gameObject.Enemy(screen,e[0] ,e[1])
+        print(enemy.x, enemy.y)
+        enemy_list.append(enemy)
+    
 
 def get_Hero() :
     global hero
@@ -29,7 +38,8 @@ def get_Hero() :
 
 
 def spwan_enenmy() :
-    new_enemy = gameObject.Enemy(screen)
+    # 추후에 맵이랑 충돌하지 않으면서 맵 안이면서 hero 주변에 스폰 되도록 하는 장치가 필요함
+    new_enemy = gameObject.Enemy(screen,0,0) 
     enemy_list.append(new_enemy)
 
 def move_enemy():
@@ -103,33 +113,20 @@ def render_objects() :
     global hero
     global screen
     global render_wall_list
-    global closest_wall_list
+    global wall_list
     
     screen.fill(color2)
     
     ## 거리 계산
     
     enemy_list = [enemy for enemy in enemy_list if  enemy.is_alive]
-    render_enemy_list = [ enemy for enemy in enemy_list if check_render_distance_object(hero,enemy)]
-
-
-    # 플레이어로 부터 가까운 별 목록을 추가
-    closest_wall_list =[]
-
-    for wall in Maps.walls :
-        new_wall = gameObject.Wall(*wall,screen)
-        if check_closest_walls(hero, new_wall) :
-            closest_wall_list.append(new_wall)
-
-    
-
+    render_enemy_list = [ enemy for enemy in enemy_list if check_render_object(hero,enemy) ]
     
     render_wall_list = []
     # 렌더링 할 벽 선택 후 추가.
-    for wall in Maps.walls :
-        new_wall = gameObject.Wall(*wall,screen)
-        if check_render_distance_walls(hero, new_wall) :
-            render_wall_list.append(new_wall)
+    for wall in wall_list :
+        if check_render_distance_walls(hero, wall) :
+            render_wall_list.append(wall)
         # for mini_wall in new_wall.get_mini_walls() :
         #     if check_render_distance_walls(hero, mini_wall) :
         #         render_wall_list.append(mini_wall) # 작은 벽으로 나눠서 그리기 이것도 쓸곳이 있을지도
@@ -140,10 +137,11 @@ def render_objects() :
         wall.show(hero)
         
     for enemy in render_enemy_list :
-        enemy.show()
+        enemy.show(hero)
     
 
     hero.show()
+    draw_position_hud()
     
     pygame.display.flip()
 
@@ -151,7 +149,25 @@ def game_end() :
     global hero
     return not hero.is_alive
 
-def check_render_distance_object(hero,enemy) :
+
+def draw_position_hud() :
+    hero_x, hero_y = hero.get_center()
+    text = f"x: {hero_x:.0f}  y: {hero_y:.0f}"
+    text_surface = hud_font.render(text, True, (235, 235, 245))
+
+    padding_x = 10
+    padding_y = 6
+    box_w = text_surface.get_width() + padding_x * 2
+    box_h = text_surface.get_height() + padding_y * 2
+    box_x = screen.get_width() - box_w - 12
+    box_y = screen.get_height() - box_h - 12
+    box = pygame.Rect(box_x, box_y, box_w, box_h)
+
+    pygame.draw.rect(screen, (18, 18, 28), box)
+    pygame.draw.rect(screen, (110, 110, 130), box, 1)
+    screen.blit(text_surface, (box_x + padding_x, box_y + padding_y))
+
+def check_render_object(hero,enemy) :
     #거리 체크 (이미 시야 거리 바깥이면 빠르게 False 반환)
     enemy_pos = enemy.get_center()
     hero_pos = hero.get_center()
@@ -174,9 +190,40 @@ def check_render_distance_object(hero,enemy) :
     # 그 값이 내 vision cos 값 보다 크면 시야 안에 있는거임
     min_cos_val = math.cos(math.radians(hero.vision)) # cos(radians(60)) -> 0.5
 
-    return dot >= min_cos_val
 
 
+    # =======================
+    visible = True
+    between_vector  = (rel_x, rel_y) # 상대 벡터
+    
+    for wall in wall_list :
+        if check_render_distance_walls(hero, wall) : # 일단 랜더링 대상 여부 확인
+            p1 = wall.get_pos()
+            p2 = wall.get_posx()
+            p3 = wall.get_posy()
+            p4 = wall.get_posxy()
+            
+            if line_cross(hero_pos, enemy_pos, p1, p2):
+                visible =  False
+            if line_cross(hero_pos, enemy_pos, p2, p4):
+                visible =  False                
+            if line_cross(hero_pos, enemy_pos, p4, p3):
+                visible =  False
+            if line_cross(hero_pos, enemy_pos, p3, p1):
+                visible =  False
+            if not visible :
+                break # 연산량 아끼기
+                
+
+    return dot >= min_cos_val and visible
+
+
+# 선분 교차 검사 수식 구글링 해서 찾아옴
+def ccw(a, b, c):
+    return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]) # 이 값이 0 을 기준으로 해당 선분의 좌우를 구분함 ( 외적 )
+
+def line_cross(a, b, c, d):
+    return ccw(a, b, c) * ccw(a, b, d) <= 0 and ccw(c, d, a) * ccw(c, d, b) <= 0 # 그리고 각 점에 대해서 연산해서 둘다 음수면 충돌함
 
 def check_render_distance_walls(hero,wall) :
     default = False
@@ -217,26 +264,17 @@ def check_render_distance_walls(hero,wall) :
 
     return dot >= min_cos_val
     
-def check_closest_walls(hero,wall):
-
-    default = False 
-    hero_pos = hero.get_center()
-    
-    for d in wall.get_point_list() :
-        dist = math.dist(d, hero_pos) # 벽의 각 점이랑 hero 의 거리를 계산. 
-        #(hero 사이즈 크기의 2배 정도 되는 거리의 벽은 다 가져온다)
-        if dist < max(hero.image.get_size())*2 and dist != 0: 
-            default = True
-            break;
-        
-    return default
-    
 def get_product(v1, v2) :
     return v1[0]*v2[0] + v1[1]*v2[1]
 
 
 def check_hero_collect_position(hero,axis) :
-    global closest_wall_list
+
+    closest_wall_list =[]
+
+    for wall in wall_list :
+        if find_col_wall(hero, wall,2) : # hero 반경 두배 범위 안의 벽만 찾고 싶어
+            closest_wall_list.append(wall)
 
     if axis == 'x':
         for wall in closest_wall_list :
@@ -255,7 +293,7 @@ def check_hero_collect_position(hero,axis) :
     
 
 
-def find_col_wall(hero, wall) : 
+def find_col_wall(hero, wall , radius_multiplier = 1) : 
     
     hero_pos = hero.get_center()
     radius = hero.radius
@@ -276,7 +314,7 @@ def find_col_wall(hero, wall) :
     elif hero_pos[1] >= max(wall.get_pos()[1], wall.get_posxy()[1]) :
         closest_point_y = max(wall.get_pos()[1], wall.get_posxy()[1])
     else :
-        closest_point_y = hero_pos[0]
+        closest_point_y = hero_pos[1]
 
     
     # 제일 가까운 점 을 구했음
@@ -286,5 +324,5 @@ def find_col_wall(hero, wall) :
 
     # 되긴 되는데, 특정 벽은 의도 한 대로 막히는데
     # 또 어떤 벽은 의도대로 안막히는 사항이 있음. 이유가 뭘까? > 집에가서 추가 적인 고민을 해보자.
-    return math.dist((closest_point_x,closest_point_y), hero_pos) <= radius
-    
+    return math.dist((closest_point_x,closest_point_y), hero_pos) <= radius * radius_multiplier
+
