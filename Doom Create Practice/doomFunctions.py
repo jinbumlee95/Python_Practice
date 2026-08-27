@@ -28,7 +28,6 @@ def init(main_screen) :
 
     for e in Maps.enemy_spawns :
         enemy = gameObject.Enemy(screen,e[0] ,e[1])
-        print(enemy.x, enemy.y)
         enemy_list.append(enemy)
     
 
@@ -154,6 +153,7 @@ def draw_position_hud() :
     hero_x, hero_y = hero.get_center()
     text = f"x: {hero_x:.0f}  y: {hero_y:.0f}"
     text_surface = hud_font.render(text, True, (235, 235, 245))
+    hp_surface = hud_font.render( f"hp: {hero.life_point:.0f}", True, (235, 235, 245))
 
     padding_x = 10
     padding_y = 6
@@ -166,6 +166,7 @@ def draw_position_hud() :
     pygame.draw.rect(screen, (18, 18, 28), box)
     pygame.draw.rect(screen, (110, 110, 130), box, 1)
     screen.blit(text_surface, (box_x + padding_x, box_y + padding_y))
+    screen.blit(hp_surface, (box_x + padding_x, box_y + padding_y - 22) )
 
 def check_render_object(hero,enemy) :
     #거리 체크 (이미 시야 거리 바깥이면 빠르게 False 반환)
@@ -326,3 +327,70 @@ def find_col_wall(hero, wall , radius_multiplier = 1) :
     # 또 어떤 벽은 의도대로 안막히는 사항이 있음. 이유가 뭘까? > 집에가서 추가 적인 고민을 해보자.
     return math.dist((closest_point_x,closest_point_y), hero_pos) <= radius * radius_multiplier
 
+def move_enemy() :
+    global enemy_list
+    global hero
+    ## 전체 적 중에서, 히어로와 가까운 적만, 히어로 방향으로 이동 시킨 후 , 본인주변 벽과의 충돌 판정 계산
+    for enemy in enemy_list :
+        dist = math.dist(enemy.get_center(), hero.get_center())
+        if dist < hero.v_distance : # 히어로의 시야 범위 안쪽의 적만 해당
+            enemy.x_before = enemy.x # 이동 전 기존 위치
+            enemy.y_before = enemy.y # 이동 전 기존 위치
+
+            e_x_move = (hero.x - enemy.x) / dist # 정규화
+            e_y_move = (hero.y - enemy.y) / dist # 정규화 
+            
+            enemy.x += 1 * e_x_move
+                # hero x 랑 enemy x사이의 상대 벡터를 쪼개서 가져가면 되는거 아님? 
+            check_hero_collect_position(enemy,'x') 
+            # hero 와 enemy 의 충돌 체크
+            enemy.y += 1 * e_y_move
+            check_hero_collect_position(enemy,'y') 
+            
+            if check_circle_to_circle_coll(hero, enemy) :
+                enemy.x = enemy.x_before - e_x_move * 60 # 충돌 했다면 왔던 벡터 방향으로 튕겨 나가게
+                enemy.y = enemy.y_before - e_y_move * 60
+                hero.life_point -= 1
+        pass
+    pass
+
+
+def check_circle_to_circle_coll(c1, c2) :
+    return math.dist(c1.get_center(),c2.get_center()) <= c1.radius+c2.radius
+
+
+def hero_attack() :
+    global enemy_list
+    # 공격하면 그냥 적을 없애 버려 일단
+    attack_list = [ enemy for enemy in enemy_list if check_render_object(hero,enemy) and is_enemey_inrange(hero,enemy) ]
+
+    for enemy in attack_list :
+        enemy.is_alive = False
+    # 렌더링 대상 적들 중에서 
+
+
+
+def is_enemey_inrange(hero, enemy) :
+#거리 체크 (이미 시야 거리 바깥이면 빠르게 False 반환)
+    enemy_pos = enemy.get_center()
+    hero_pos = hero.get_center()
+    
+    dist = math.dist(enemy_pos, hero_pos)
+    if dist > hero.attack_range or dist == 0:
+        return False
+
+    #  상대 적인 위치를 계산 한 후 상대 위치 저장
+    rel_x = (enemy_pos[0] - hero_pos[0]) / dist
+    rel_y = (enemy_pos[1] - hero_pos[1]) / dist
+
+    # 캐릭터가 바라보고 있는 방향에 대해서 단위 벡터 생성( sin^2 + cos^2 = 1 이니까 )
+    facing_x = math.cos(math.radians(hero.rotate-90)) # 정면을 0 이라고 해서 90도 보정
+    facing_y = math.sin(math.radians(hero.rotate-90))
+
+    # 상대적  위치랑 내 시야 랑 내적함
+    dot = rel_x * facing_x + rel_y * facing_y
+
+    # attack_rad 와 비교
+    min_cos_val = math.cos(math.radians(hero.attack_rad)) # cos(radians(60)) -> 0.5
+
+    return dot >= min_cos_val

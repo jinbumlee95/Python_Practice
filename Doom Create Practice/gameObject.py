@@ -34,15 +34,18 @@ class Hero(game_Object) :
     def __init__(self,main_screen) : 
         super().__init__(main_screen)
         self.set_img('images/guy.png')
-        self.x = self.screen.get_width() / 2 - self.image.get_size()[0]
-        self.y = self.screen.get_height() - self.image.get_size()[1] # 초기 세팅
+        self.x = self.screen.get_width() / 2
+        self.y = self.screen.get_height() # 초기 세팅
         self.rotate = 0 % 360  # 각도 처리(360도 기준)
         self.vision = 60 # 정면 120도를 본다 (절반씩 더하고 뺀다?)
         self.v_distance = 1200 # 최대 인식 거리
         self.radius = self.image.get_size()[0]/2 # 반경
+        self.attack_range = 300
+        self.attack_rad = 30
 
-        self.render_x = self.screen.get_width() / 2 - self.image.get_size()[0]
-        self.render_y = self.screen.get_height() - self.image.get_size()[1]
+        
+        self.render_x = self.screen.get_width() / 2
+        self.render_y = self.screen.get_height() - self.radius
         
         # 이미지를 계속 회전 시키면 깨지니까, 저장해두고 회전후 세팅할 이미지 하나
         self.orig_image = self.image.copy()
@@ -52,7 +55,7 @@ class Hero(game_Object) :
 
         # 3. 원본(orig_image)을 기준으로 회전하여 새로운 image 생성
         self.image = pygame.transform.rotate(self.orig_image, -self.rotate) 
-        # pygame ratate 가 반시계 방햐잉 기본이라서
+        # pygame ratate 가 반시계 방향이 기본이라서
 
         # 4. 회전 후 바뀐 크기에 맞춰 x, y 좌표를 재조정하여 중심점 유지
         new_w, new_h = self.image.get_size()
@@ -71,6 +74,7 @@ class Enemy(game_Object) :
         self.set_img('images/enemy.png').change_size(30,30)
         self.x = x
         self.y = y
+        self.radius = self.image.get_size()[0]/2 # 반경
 
 
     def show(self,hero) :
