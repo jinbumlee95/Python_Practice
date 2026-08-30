@@ -85,8 +85,9 @@ def update(frame_dt=None):
     if input_handler.consume("attack"):
         hero_attack()
 
-    move_hero(frame_dt)
-    move_enemy(frame_dt)
+    # Hero 한 명의 이동은 Hero 객체가 자기 update에서 직접 처리한다.
+    hero.update(input_handler, frame_dt, check_hero_collect_position)
+    move_enemies(frame_dt)
     input_handler.reset_frame()
 
 def spawn_enemy(max_attempts=SPAWN_TRY_LIMIT):
@@ -146,14 +147,9 @@ def can_spawn_enemy(enemy):
     return True
 
 
-def move_hero(frame_dt=None):
-    # 실제 이동 계산은 Hero 내부 메소드가 담당한다.
-    # doomFunctions는 충돌 검사 함수를 같이 넘겨주는 연결만 한다.
-    hero.update(input_handler, _resolve_dt(frame_dt), check_hero_collect_position)
-
-
-def move_enemy(frame_dt=None):
-    # 적은 Hero 방향으로 이동하되, Hero 시야 거리 안에 있을 때만 추적한다.
+def move_enemies(frame_dt=None):
+    # Enemy 한 마리의 추적 이동은 Enemy.chase가 처리한다.
+    # 여기서는 enemy_list 전체를 순회하고, Hero 충돌/HP 감소 같은 월드 단위 결과를 처리한다.
     frame_dt = _resolve_dt(frame_dt)
 
     for enemy in enemy_list:
@@ -168,6 +164,12 @@ def move_enemy(frame_dt=None):
             hero.life_point -= 1
             if hero.life_point <= 0:
                 hero.is_alive = False
+
+
+def move_enemy(frame_dt=None):
+    # 기존 실험 코드에서 move_enemy를 부를 수 있어서 남겨둔 호환용 함수.
+    # 새 흐름에서는 여러 적을 다룬다는 의미가 더 분명한 move_enemies를 사용한다.
+    move_enemies(frame_dt)
 
 
 def render_objects():
