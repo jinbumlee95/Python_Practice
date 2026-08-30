@@ -1,206 +1,205 @@
-import pygame
-import random
-import math
+import numpy as np
 
-class game_Object : 
-    def __init__(self,main_screen) : 
-        self.x = 0
-        self.y = 0 
-        self.is_alive = True
-        self.screen = main_screen
-        self.life_point = 100
-        
-    def set_img(self,addr) :
-        self.image = pygame.image.load(addr)
-        return self
-
-    def change_size(self,w,h) :
-        self.image = pygame.transform.scale(self.image, (w, h))
-        return self
-
-    
-    def show(self) :
-        self.screen.blit(self.image, (self.x,self.y))
-
-    def get_pos(self) :
-        return (self.x,self.y)
-        
-    def get_center(self) :
-        return (self.x + self.image.get_size()[0] / 2  ,self.y + self.image.get_size()[1] / 2 )
+import geometry
 
 
-
-class Hero(game_Object) : 
-    def __init__(self,main_screen) : 
-        super().__init__(main_screen)
-        self.set_img('images/guy.png')
-        self.x = self.screen.get_width() / 2
-        self.y = self.screen.get_height() # 초기 세팅
-        self.rotate = 0 % 360  # 각도 처리(360도 기준)
-        self.vision = 60 # 정면 120도를 본다 (절반씩 더하고 뺀다?)
-        self.v_distance = 1200 # 최대 인식 거리
-        self.radius = self.image.get_size()[0]/2 # 반경
-        self.attack_range = 300
-        self.attack_rad = 30
-
-        
-        self.render_x = self.screen.get_width() / 2
-        self.render_y = self.screen.get_height() - self.radius
-        
-        # 이미지를 계속 회전 시키면 깨지니까, 저장해두고 회전후 세팅할 이미지 하나
-        self.orig_image = self.image.copy()
-
-    def rotate_head(self):
-        old_center = self.get_center()
-
-        # 3. 원본(orig_image)을 기준으로 회전하여 새로운 image 생성
-        self.image = pygame.transform.rotate(self.orig_image, -self.rotate) 
-        # pygame ratate 가 반시계 방향이 기본이라서
-
-        # 4. 회전 후 바뀐 크기에 맞춰 x, y 좌표를 재조정하여 중심점 유지
-        new_w, new_h = self.image.get_size()
-        self.x = old_center[0] - new_w / 2
-        self.y = old_center[1] - new_h / 2
-
-        return self
-
-    def show(self) :
-        #self.screen.blit(self.image, (self.render_x,self.render_y))
-        pygame.draw.circle(self.screen, 'red', (self.render_x,self.render_y), self.radius)
-
-class Enemy(game_Object) : 
-    def __init__(self,main_screen,x = 0 ,y = 0) : 
-        super().__init__(main_screen)
-        self.set_img('images/enemy.png').change_size(30,30)
+class game_Object:
+    def __init__(self, x=0, y=0, width=0, height=0):
+        # GameObject 계층은 pygame을 모르는 순수 게임 상태만 가진다.
+        # 이미지를 어떻게 그리고 어떤 키로 움직이는지는 바깥 객체가 담당한다.
         self.x = x
         self.y = y
-        self.radius = self.image.get_size()[0]/2 # 반경
+        self.x_before = x
+        self.y_before = y
+        self.width = width
+        self.height = height
+        self.radius = min(width, height) / 2 if width and height else 0
+        self.is_alive = True
+        self.life_point = 100
+
+    def set_size(self, width, height):
+        self.width = width
+        self.height = height
+        self.radius = min(width, height) / 2
+        return self
+
+    def get_pos(self):
+        return (self.x, self.y)
+
+    def get_center(self):
+        return (self.x + self.width / 2, self.y + self.height / 2)
 
 
-    def show(self,hero) :
-        # hero의 월드 중심점: 벽을 hero 기준 상대좌표로 바꿀 때 기준점으로 쓴다.
-        hero_center_x, hero_center_y = hero.get_center()
+class Hero(game_Object):
+    def __init__(self, screen_size, image_size):
+        # Hero는 이미지 자체가 아니라 이미지 크기만 받아서 충돌 반경과 중심점을 계산한다.
+        super().__init__(width=image_size[0], height=image_size[1])
+        screen_width, screen_height = screen_size
+        self.x = screen_width / 2
+        self.y = screen_height
+        self.x_before = self.x
+        self.y_before = self.y
 
-        # hero의 화면 렌더 중심점: 상대좌표 계산이 끝난 벽을 화면에 다시 얹는 기준점이다.
-        hero_render_center_x = hero.render_x
-        hero_render_center_y = hero.render_y
+        self.rotate = 0 % 360
+        self.vision = 60
+        self.v_distance = 1200
+        self.attack_range = 300
+        self.attack_rad = 30
+        self.move_speed = 400
+        self.turn_speed = 80
 
-        # 삼각함수는 degree가 아니라 radian을 받기 때문에 rotate 값을 변환한다.
-        rad = math.radians(hero.rotate)
+        self.render_x = screen_width / 2
+        self.render_y = screen_height - self.radius
 
-        # hero기준의 회전 방향 (x axis)
-        right_x = math.cos(rad)
-        right_y = math.sin(rad)
+    def update(self, input_state, dt, collision_resolver=None):
+        # 회전은 이동 벡터를 만들기 전에 먼저 반영한다.
+        # 이렇게 해야 같은 프레임의 전진 입력이 새 시선 방향을 따라간다.
+        if input_state.is_pressed("turn_left"):
+            self.rotate = (self.rotate - self.turn_speed * dt) % 360
+        if input_state.is_pressed("turn_right"):
+            self.rotate = (self.rotate + self.turn_speed * dt) % 360
 
-        # hero의 논리적 y축 ( hero.rotate == 0  일때 y-axis 인 계산)
-        forward_x = math.cos(rad - math.pi / 2)
-        forward_y = math.sin(rad - math.pi / 2)
+        # 입력 상태를 Hero 기준 방향 벡터로 바꾼다.
+        # 여기서 Hero는 pygame 키가 아니라 forward/backward 같은 액션만 읽는다.
+        forward, right = geometry.movement_vectors(self.rotate)
+        movement = np.array([0.0, 0.0], dtype=float)
 
-        def to_screen(point) :
-            rel_x = point[0] - hero_center_x
-            rel_y = point[1] - hero_center_y
+        if input_state.is_pressed("forward"):
+            movement += forward
+        if input_state.is_pressed("backward"):
+            movement -= forward
+        if input_state.is_pressed("strafe_right"):
+            movement += right
+        if input_state.is_pressed("strafe_left"):
+            movement -= right
 
-            # 상대 위치가 hero의 오른쪽 방향으로 얼마나 떨어져 있는지 계산한다.
-            view_x = rel_x * right_x + rel_y * right_y
+        # 대각선 이동이 더 빨라지지 않도록 최종 이동 벡터를 정규화한다.
+        movement = geometry.normalize(movement)
+        if np.linalg.norm(movement) == 0:
+            return
 
-            # 상대 위치가 hero의 앞쪽 방향으로 얼마나 떨어져 있는지 계산한다.
-            view_y = rel_x * forward_x + rel_y * forward_y
+        self._move_with_collision(movement * self.move_speed * dt, collision_resolver)
 
-            # view_x는 화면 오른쪽이 +라서 더하고, view_y는 앞쪽을 화면 위로 보이게 하려고 뺀다.
-            return (int(hero_render_center_x + view_x),
-                    int(hero_render_center_y - view_y))
-        
-        self.screen.blit( self.image, to_screen(self.get_pos()) )
-        
-        
-class Wall():
-    def __init__(self,x,y,w,h,main_screen) :
-        self.x = x 
+    def _move_with_collision(self, movement, collision_resolver=None):
+        # x축과 y축을 나눠 움직이면 벽에 부딪힐 때 한 축만 되돌릴 수 있다.
+        # 그래서 벽을 비비며 움직이는 느낌을 만들기 쉽다.
+        self.x_before = self.x
+        self.x += movement[0]
+        if collision_resolver is not None:
+            collision_resolver(self, "x")
+
+        self.y_before = self.y
+        self.y += movement[1]
+        if collision_resolver is not None:
+            collision_resolver(self, "y")
+
+
+class Enemy(game_Object):
+    def __init__(self, x=0, y=0, image_size=(30, 30)):
+        # Enemy도 이미지 객체는 들고 있지 않고, 충돌에 필요한 크기만 저장한다.
+        super().__init__(x=x, y=y, width=image_size[0], height=image_size[1])
+        self.move_speed = 60
+
+    def chase(self, target, dt, collision_resolver=None):
+        # 적에서 Hero로 향하는 상대 벡터를 만들고, 길이 1의 방향 벡터로 바꾼다.
+        target_pos = geometry.as_point(target.get_center())
+        enemy_pos = geometry.as_point(self.get_center())
+        direction = target_pos - enemy_pos
+        dist = np.linalg.norm(direction)
+
+        if dist >= target.v_distance or dist == 0:
+            return None
+
+        # 방향은 유지하고, 실제 이동량은 speed * dt로 결정한다.
+        direction = direction / dist
+        movement = direction * self.move_speed * dt
+        self._move_with_collision(movement, collision_resolver)
+        return direction
+
+    def _move_with_collision(self, movement, collision_resolver=None):
+        # Hero 이동과 같은 방식으로 축별 충돌 처리를 한다.
+        self.x_before = self.x
+        self.x += movement[0]
+        if collision_resolver is not None:
+            collision_resolver(self, "x")
+
+        self.y_before = self.y
+        self.y += movement[1]
+        if collision_resolver is not None:
+            collision_resolver(self, "y")
+
+
+class Wall:
+    def __init__(self, x, y, w, h):
+        # 벽은 월드 좌표의 직사각형 정보만 가진다.
+        # 실제 화면에 어떻게 보일지는 Renderer가 Hero 시점으로 변환해서 그린다.
+        self.x = x
         self.y = y
         self.w = w
         self.h = h
-        self.screen = main_screen
-        
-    def get_pos(self) :
-        return (self.x,self.y)
 
-    def get_posx(self) :
-        return (self.x+self.w,self.y)
+    def get_pos(self):
+        return (self.x, self.y)
 
-    def get_posy(self) :
-        return (self.x,self.y+self.h)
+    def get_posx(self):
+        return (self.x + self.w, self.y)
 
-    def get_posxy(self) :
-        return (self.x+self.w,self.y+self.h)
-        
-    def get_center(self) :
-        return (self.x + self.w/2  ,self.y + self.h/2 )
+    def get_posy(self):
+        return (self.x, self.y + self.h)
 
-    def get_point_list(self) :
-        point_list = []
-        for i in range(self.x, self.x + self.w , 100) :
-            for j in range(self.y , self.y + self.h,100) :
-                point_list.append( (i,j) ) 
-        return point_list
+    def get_posxy(self):
+        return (self.x + self.w, self.y + self.h)
 
-    def get_mini_walls(self) :
+    def get_center(self):
+        return (self.x + self.w / 2, self.y + self.h / 2)
+
+    def get_point_list(self):
+        return [tuple(point) for point in self.get_points_array()]
+
+    def get_points_array(self):
+        # 큰 벽은 꼭짓점만 보면 시야 판정이 빗나갈 수 있어서 일정 간격으로 샘플 점을 만든다.
+        # numpy meshgrid로 벽 내부의 검사 좌표들을 한 번에 생성한다.
+        step = 100
+        xs = np.arange(self.x, self.x + self.w, step)
+        ys = np.arange(self.y, self.y + self.h, step)
+        grid_x, grid_y = np.meshgrid(xs, ys)
+        return np.column_stack((grid_x.ravel(), grid_y.ravel()))
+
+    def render_points(self):
+        # 화면에 벽을 그릴 때 필요한 네 꼭짓점.
+        # numpy 배열로 넘기면 Renderer에서 한 번에 좌표 변환하기 좋다.
+        return np.array(
+            [
+                self.get_pos(),
+                self.get_posx(),
+                self.get_posxy(),
+                self.get_posy(),
+            ],
+            dtype=float,
+        )
+
+    def rect_min(self):
+        return (min(self.x, self.x + self.w), min(self.y, self.y + self.h))
+
+    def rect_max(self):
+        return (max(self.x, self.x + self.w), max(self.y, self.y + self.h))
+
+    def get_mini_walls(self):
+        # 긴 벽을 작은 벽 단위로 쪼개고 싶을 때 쓰는 보조 함수.
+        # 현재 렌더링에서는 직접 사용하지 않지만, 시야/충돌 최적화 후보로 남겨둔다.
         list_mini_walls = []
         mini_size = 100
 
         if self.w >= self.h:
-            for i in range(self.x, self.x + self.w, mini_size) :
+            for i in range(self.x, self.x + self.w, mini_size):
                 mini_w = min(mini_size, self.x + self.w - i)
-                list_mini_walls.append(Wall(i, self.y, mini_w, self.h, self.screen))
+                list_mini_walls.append(Wall(i, self.y, mini_w, self.h))
         else:
-            for j in range(self.y, self.y + self.h, mini_size) :
+            for j in range(self.y, self.y + self.h, mini_size):
                 mini_h = min(mini_size, self.y + self.h - j)
-                list_mini_walls.append(Wall(self.x, j, self.w, mini_h, self.screen))
+                list_mini_walls.append(Wall(self.x, j, self.w, mini_h))
 
         return list_mini_walls
 
-    # 벽그리기.. .. 회전이 필요하다.
-    def show(self,hero) :
-        # 일단 사각형으로 그리는건 성공
-        
-        # hero의 월드 중심점: 벽을 hero 기준 상대좌표로 바꿀 때 기준점으로 쓴다.
-        hero_center_x, hero_center_y = hero.get_center()
 
-        # hero의 화면 렌더 중심점: 상대좌표 계산이 끝난 벽을 화면에 다시 얹는 기준점이다.
-        hero_render_center_x = hero.render_x
-        hero_render_center_y = hero.render_y
-
-        # 삼각함수는 degree가 아니라 radian을 받기 때문에 rotate 값을 변환한다.
-        rad = math.radians(hero.rotate)
-
-        # hero기준의 회전 방향 (x axis)
-        right_x = math.cos(rad)
-        right_y = math.sin(rad)
-
-        # hero의 논리적 y축 ( hero.rotate == 0  일때 y-axis 인 계산)
-        forward_x = math.cos(rad - math.pi / 2)
-        forward_y = math.sin(rad - math.pi / 2)
-
-        def to_screen(point) :
-            # 벽 꼭짓점의 월드 좌표에서 hero 월드 중심을 빼서 hero 기준 상대 위치로 만든다.
-            rel_x = point[0] - hero_center_x
-            rel_y = point[1] - hero_center_y
-
-            # 상대 위치가 hero의 오른쪽 방향으로 얼마나 떨어져 있는지 계산한다.
-            view_x = rel_x * right_x + rel_y * right_y
-
-            # 상대 위치가 hero의 앞쪽 방향으로 얼마나 떨어져 있는지 계산한다.
-            view_y = rel_x * forward_x + rel_y * forward_y
-
-            # view_x는 화면 오른쪽이 +라서 더하고, view_y는 앞쪽을 화면 위로 보이게 하려고 뺀다.
-            return (int(hero_render_center_x + view_x),
-                    int(hero_render_center_y - view_y))
-
-        # 벽의 네 꼭짓점을 각각 hero 기준 화면 좌표로 변환한다.
-        p1 = to_screen(self.get_pos())
-        p2 = to_screen(self.get_posx())
-        p3 = to_screen(self.get_posy())
-        p4 = to_screen(self.get_posxy())
-
-        # 잘 그려지면 좋겠다.
-        pygame.draw.polygon(self.screen,(255,255,255), (p1,p2,p4,p3) )
-        
+GameObject = game_Object

@@ -1,396 +1,330 @@
-import pygame
-import math
-import gameObject
-import Maps
+import random
 
-dt = 0.05
+import gameObject
+import geometry
+import Maps
+from asset_manager import AssetManager
+from input_handler import InputHandler
+from renderer import Renderer
+
+
+DEFAULT_DT = 1 / 60
+SPAWN_TRY_LIMIT = 300
+dt = DEFAULT_DT
 color2 = (5, 0, 16)
 
-def init(main_screen) :
+screen = None
+hero = None
+enemy_list = []
+render_wall_list = []
+wall_list = []
+assets = None
+renderer = None
+input_handler = None
+
+
+def init(main_screen):
+    # 기존 노트북 호출 흐름을 유지하기 위해 init에서 전체 게임 상태를 한 번에 준비한다.
+    # 나중에 Game 클래스로 옮기기 전까지는 doomFunctions가 연결자 역할을 맡는다.
     global screen
     global hero
     global enemy_list
     global render_wall_list
     global wall_list
-    global hud_font
-    
-    render_wall_list = []
-    enemy_list = []
+    global assets
+    global renderer
+    global input_handler
+
     screen = main_screen
-    screen.fill(color2)
-    hero = gameObject.Hero(screen)
-    hud_font = pygame.font.SysFont(None, 22)
 
-    wall_list = []
-    for wall in Maps.walls :
-        new_wall = gameObject.Wall(*wall,screen)
-        wall_list.append(new_wall)
+    # pygame 이미지 처리는 AssetManager에 모아둔다.
+    # Hero/Enemy는 Surface를 직접 들고 있지 않고, 필요한 크기만 받아간다.
+    assets = AssetManager()
+    assets.load_image("hero", "images/guy.png")
+    assets.load_image("enemy", "images/enemy.png", size=(30, 30))
 
-    for e in Maps.enemy_spawns :
-        enemy = gameObject.Enemy(screen,e[0] ,e[1])
-        enemy_list.append(enemy)
-    
+    # Renderer와 InputHandler만 pygame의 화면/이벤트 세부사항을 직접 안다.
+    renderer = Renderer(screen, assets, color2)
+    input_handler = InputHandler()
+    hero = gameObject.Hero(screen.get_size(), assets.get_size("hero"))
 
-def get_Hero() :
-    global hero
+    # Maps.py의 튜플 데이터를 실제 게임 객체로 바꿔둔다.
+    wall_list = [gameObject.Wall(*wall) for wall in Maps.walls]
+    enemy_size = assets.get_size("enemy")
+    enemy_list = [
+        gameObject.Enemy(spawn_x, spawn_y, enemy_size)
+        for spawn_x, spawn_y in Maps.enemy_spawns
+    ]
+    render_wall_list = []
+
+
+def get_Hero():
     return hero
 
 
-def spwan_enenmy() :
-    # 추후에 맵이랑 충돌하지 않으면서 맵 안이면서 hero 주변에 스폰 되도록 하는 장치가 필요함
-    new_enemy = gameObject.Enemy(screen,0,0) 
-    enemy_list.append(new_enemy)
+def get_input_handler():
+    return input_handler
 
-def move_enemy():
+
+def handle_event(event):
+    # 메인 루프에서 받은 pygame 이벤트를 입력 상태 객체로 넘긴다.
+    # 여기서부터는 pygame 키 코드가 게임 액션 이름으로 바뀐다.
+    input_handler.handle_event(event)
+
+
+def quit_requested():
+    return input_handler.quit_requested
+
+
+def update(frame_dt=None):
+    # 한 프레임의 게임 상태 갱신 순서.
+    # 입력 처리 결과를 보고 Hero, Enemy 같은 객체들이 자기 상태를 업데이트한다.
+    frame_dt = _resolve_dt(frame_dt)
+
+    # 공격은 누르고 있는 동안 매 프레임 나가지 않도록 consume으로 한 번만 처리한다.
+    if input_handler.consume("attack"):
+        hero_attack()
+
+    move_hero(frame_dt)
+    move_enemy(frame_dt)
+    input_handler.reset_frame()
+
+def spawn_enemy(max_attempts=SPAWN_TRY_LIMIT):
+    # 랜덤 좌표를 여러 번 뽑아보면서 스폰 가능한 위치를 찾는다.
+    # 조건을 끝까지 만족하는 후보만 실제 enemy_list에 추가한다.
+    enemy = make_random_enemy(max_attempts)
+    if enemy is None:
+        return None
+
+    enemy_list.append(enemy)
+    return enemy
+
+
+def make_random_enemy(max_attempts=SPAWN_TRY_LIMIT):
+    # 스폰 후보를 만들고, Hero 주변 안전거리 밖/벽 미충돌 조건을 검사한다.
+    # 실패할 수 있으므로 무한 반복 대신 최대 시도 횟수를 둔다.
+    enemy_size = assets.get_size("enemy")
+
+    for _ in range(max_attempts):
+        enemy = make_random_enemy_candidate(enemy_size)
+        if can_spawn_enemy(enemy):
+            return enemy
+
+    return None
+
+
+def make_random_enemy_candidate(enemy_size):
+    # 맵 전체 경계 안에서 적의 좌상단 좌표를 랜덤으로 고른다.
+    # 벽과 겹치는지 여부는 can_spawn_enemy에서 따로 검사한다.
+    min_x, min_y, max_x, max_y = get_map_bounds()
+    enemy_w, enemy_h = enemy_size
+
+    x = random.uniform(min_x, max_x - enemy_w)
+    y = random.uniform(min_y, max_y - enemy_h)
+    return gameObject.Enemy(x, y, enemy_size)
+
+
+def get_map_bounds():
+    # 현재 맵은 외곽 벽이 전체 영역을 감싸는 구조다.
+    # 그래서 모든 벽의 최소/최대 좌표를 이용해 랜덤 스폰 범위를 만든다.
+    min_x = min(wall.rect_min()[0] for wall in wall_list)
+    min_y = min(wall.rect_min()[1] for wall in wall_list)
+    max_x = max(wall.rect_max()[0] for wall in wall_list)
+    max_y = max(wall.rect_max()[1] for wall in wall_list)
+    return min_x, min_y, max_x, max_y
+
+
+def can_spawn_enemy(enemy):
+    # 벽과 겹치는 위치면 생성하지 않는다.
+    if any(find_col_wall(enemy, wall) for wall in wall_list):
+        return False
+
+    # 시야 바깥에서 생성 되도록 처리
+    if geometry.distance(hero.get_center(), enemy.get_center()) < hero.v_distance:
+        return False
+
+    return True
+
+
+def move_hero(frame_dt=None):
+    # 실제 이동 계산은 Hero 내부 메소드가 담당한다.
+    # doomFunctions는 충돌 검사 함수를 같이 넘겨주는 연결만 한다.
+    hero.update(input_handler, _resolve_dt(frame_dt), check_hero_collect_position)
+
+
+def move_enemy(frame_dt=None):
+    # 적은 Hero 방향으로 이동하되, Hero 시야 거리 안에 있을 때만 추적한다.
+    frame_dt = _resolve_dt(frame_dt)
+
+    for enemy in enemy_list:
+        direction = enemy.chase(hero, frame_dt, check_hero_collect_position)
+        if direction is None:
+            continue
+
+        # Hero와 부딪히면 적을 진행 반대 방향으로 밀어내고 HP를 깎는다.
+        if check_circle_to_circle_coll(hero, enemy):
+            enemy.x = enemy.x_before - direction[0] * 60
+            enemy.y = enemy.y_before - direction[1] * 60
+            hero.life_point -= 1
+            if hero.life_point <= 0:
+                hero.is_alive = False
+
+
+def render_objects():
+    # 렌더링 전에 살아있는 적만 남기고, 현재 시야에 들어오는 대상만 골라낸다.
     global enemy_list
-    
-    for enemy in enemy_list : 
-        enemy.y += 400 * dt
-            
-    
-
-def find_col(obj1, obj2) : 
-    ## 현채 위치 + 사이즈로 범위 구간을 찾을 수 있고, 해당 범위 구간 안에 있다면 처리 가능?
-    ## pygame 충돌 감지 함수가 있겠지만 직접 구현 해보기
-    x_obj1_end = (obj1.x + obj1.image.get_size()[0])
-    x_obj2_end = (obj2.x + obj2.image.get_size()[0])
-
-    y_obj1_end = (obj1.y + obj1.image.get_size()[1])
-    y_obj2_end = (obj2.y + obj2.image.get_size()[1])
-
-    ## case x-axis 
-    check_x = (obj1.x >= obj2.x and x_obj2_end >= obj1.x ) or (obj2.x >= obj1.x and x_obj1_end >= obj2.x ) ## x 값이 서로의 구간 안에 겹친다면
-    check_y = (obj1.y >= obj2.y and y_obj2_end >= obj1.y ) or (obj2.y >= obj1.y and y_obj1_end >= obj2.y ) ## y 값이 서로의 구간 안에 겹친다면
-    
-
-    return not (check_x and check_y) # 둘다 해당 해야함 > 사망 처리를 위해 False 리턴
-
-
-
-# 화면 전환을 각도로 처리하기 위해서는, 캐릭터가 직선으로 움직이는게 아니라, 보고있는 방향으로 움직여야 한다
-# Hero class 에서 저장해둔 현재 바라보는 방향 rotate 를 기준으로 x,y 를 움직이는데,
-# 통상적인 좌표 환경에서는 x 축이 좌우, y축이 앞 뒤인데, 이는 0도가 x 축이기 때문.
-# 이 상황을 뒤집으려면 > 90도 shift  sin cos 반대로 쓰기 > 인데 cos은 우함수 >> y만 반대로 써야 함  (-sin)
-def move_hero() :
-    global hero
-
-    hero.x_before = hero.x # 이동 전 기존 위치
-    hero.y_before = hero.y # 이동 전 기존 위치
-
-    
-    keys = pygame.key.get_pressed()
-    if keys[pygame.K_UP]:
-        hero.x += 400 * dt * math.sin(math.radians(hero.rotate))  
-        check_hero_collect_position(hero,'x') 
-        hero.y -= 400 * dt * math.cos(math.radians(hero.rotate)) # y 방향이 아래가 + 라서 -sin 
-        check_hero_collect_position(hero,'y') 
-    if keys[pygame.K_DOWN]:
-        hero.x -= 400 * dt * math.sin(math.radians(hero.rotate))
-        check_hero_collect_position(hero,'x') 
-        hero.y += 400 * dt * math.cos(math.radians(hero.rotate))
-        check_hero_collect_position(hero,'y') 
-    if keys[pygame.K_LEFT]:
-        hero.rotate -= 400 * dt * 0.2
-        if hero.rotate <= 0 :
-           hero.rotate = 360 + hero.rotate
-    if keys[pygame.K_RIGHT]:
-        hero.rotate += 400 * dt * 0.2
-        hero.rotate = hero.rotate % 360
-
-    
-    
-    
-    #hero.rotate_head() # 현재 hero 가 보고 있는 방향으로 머리 돌려주는거
-    # 지도 같은게 필요하면 이거 쓰면 됨
-    # for enemy in enemy_list : 
-    #     if hero.is_alive:
-    #         hero.is_alive = find_col(enemy,hero)
-        
-    
-def render_objects() :
-    global enemy_list
-    global hero
-    global screen
     global render_wall_list
-    global wall_list
-    
-    screen.fill(color2)
-    
-    ## 거리 계산
-    
-    enemy_list = [enemy for enemy in enemy_list if  enemy.is_alive]
-    render_enemy_list = [ enemy for enemy in enemy_list if check_render_object(hero,enemy) ]
-    
-    render_wall_list = []
-    # 렌더링 할 벽 선택 후 추가.
-    for wall in wall_list :
-        if check_render_distance_walls(hero, wall) :
-            render_wall_list.append(wall)
-        # for mini_wall in new_wall.get_mini_walls() :
-        #     if check_render_distance_walls(hero, mini_wall) :
-        #         render_wall_list.append(mini_wall) # 작은 벽으로 나눠서 그리기 이것도 쓸곳이 있을지도
 
-    
-    
-    for wall in render_wall_list :
-        wall.show(hero)
-        
-    for enemy in render_enemy_list :
-        enemy.show(hero)
-    
+    enemy_list = [enemy for enemy in enemy_list if enemy.is_alive]
+    render_enemy_list = [
+        enemy for enemy in enemy_list if check_render_object(hero, enemy)
+    ]
+    render_wall_list = [
+        wall for wall in wall_list if check_render_distance_walls(hero, wall)
+    ]
 
-    hero.show()
-    draw_position_hud()
-    
-    pygame.display.flip()
+    # 실제 pygame draw/blit은 Renderer에게 맡긴다.
+    renderer.render(hero, render_wall_list, render_enemy_list)
 
-def game_end() : 
-    global hero
+
+def game_end():
     return not hero.is_alive
 
 
-def draw_position_hud() :
-    hero_x, hero_y = hero.get_center()
-    text = f"x: {hero_x:.0f}  y: {hero_y:.0f}"
-    text_surface = hud_font.render(text, True, (235, 235, 245))
-    hp_surface = hud_font.render( f"hp: {hero.life_point:.0f}", True, (235, 235, 245))
+def draw_position_hud():
+    renderer.draw_position_hud(hero)
 
-    padding_x = 10
-    padding_y = 6
-    box_w = text_surface.get_width() + padding_x * 2
-    box_h = text_surface.get_height() + padding_y * 2
-    box_x = screen.get_width() - box_w - 12
-    box_y = screen.get_height() - box_h - 12
-    box = pygame.Rect(box_x, box_y, box_w, box_h)
 
-    pygame.draw.rect(screen, (18, 18, 28), box)
-    pygame.draw.rect(screen, (110, 110, 130), box, 1)
-    screen.blit(text_surface, (box_x + padding_x, box_y + padding_y))
-    screen.blit(hp_surface, (box_x + padding_x, box_y + padding_y - 22) )
-
-def check_render_object(hero,enemy) :
-    #거리 체크 (이미 시야 거리 바깥이면 빠르게 False 반환)
-    enemy_pos = enemy.get_center()
+def check_render_object(hero, enemy):
+    # 먼저 거리와 시야각을 검사해서 보이지 않는 적은 빠르게 제외한다.
     hero_pos = hero.get_center()
-    
-    dist = math.dist(enemy_pos, hero_pos)
-    if dist > hero.v_distance or dist == 0:
+    enemy_pos = enemy.get_center()
+    facing = geometry.facing_vector(hero.rotate)
+
+    if not geometry.target_in_angle(
+        hero_pos,
+        enemy_pos,
+        facing,
+        hero.v_distance,
+        hero.vision,
+    ):
         return False
 
-    #  상대 적인 위치를 계산 한 후 상대 위치 저장
-    rel_x = (enemy_pos[0] - hero_pos[0]) / dist
-    rel_y = (enemy_pos[1] - hero_pos[1]) / dist
+    # 각 벽의 네 변과 Hero-Enemy 선분이 교차하면 벽 뒤에 있는 것으로 본다.
+    for wall in wall_list:
+        if not check_render_distance_walls(hero, wall):
+            continue
 
-    # 캐릭터가 바라보고 있는 방향에 대해서 단위 벡터 생성( sin^2 + cos^2 = 1 이니까 )
-    facing_x = math.cos(math.radians(hero.rotate-90)) # 정면을 0 이라고 해서 90도 보정
-    facing_y = math.sin(math.radians(hero.rotate-90))
+        p1, p2, p4, p3 = wall.render_points()
+        if geometry.line_cross(hero_pos, enemy_pos, p1, p2):
+            return False
+        if geometry.line_cross(hero_pos, enemy_pos, p2, p4):
+            return False
+        if geometry.line_cross(hero_pos, enemy_pos, p4, p3):
+            return False
+        if geometry.line_cross(hero_pos, enemy_pos, p3, p1):
+            return False
 
-    # 상대적  위치랑 내 시야 랑 내적함
-    dot = rel_x * facing_x + rel_y * facing_y
-
-    # 그 값이 내 vision cos 값 보다 크면 시야 안에 있는거임
-    min_cos_val = math.cos(math.radians(hero.vision)) # cos(radians(60)) -> 0.5
-
-
-
-    # =======================
-    visible = True
-    between_vector  = (rel_x, rel_y) # 상대 벡터
-    
-    for wall in wall_list :
-        if check_render_distance_walls(hero, wall) : # 일단 랜더링 대상 여부 확인
-            p1 = wall.get_pos()
-            p2 = wall.get_posx()
-            p3 = wall.get_posy()
-            p4 = wall.get_posxy()
-            
-            if line_cross(hero_pos, enemy_pos, p1, p2):
-                visible =  False
-            if line_cross(hero_pos, enemy_pos, p2, p4):
-                visible =  False                
-            if line_cross(hero_pos, enemy_pos, p4, p3):
-                visible =  False
-            if line_cross(hero_pos, enemy_pos, p3, p1):
-                visible =  False
-            if not visible :
-                break # 연산량 아끼기
-                
-
-    return dot >= min_cos_val and visible
+    return True
 
 
-# 선분 교차 검사 수식 구글링 해서 찾아옴
 def ccw(a, b, c):
-    return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]) # 이 값이 0 을 기준으로 해당 선분의 좌우를 구분함 ( 외적 )
+    return geometry.ccw(a, b, c)
+
 
 def line_cross(a, b, c, d):
-    return ccw(a, b, c) * ccw(a, b, d) <= 0 and ccw(c, d, a) * ccw(c, d, b) <= 0 # 그리고 각 점에 대해서 연산해서 둘다 음수면 충돌함
-
-def check_render_distance_walls(hero,wall) :
-    default = False
-    #거리 체크 (이미 시야 거리 바깥이면 빠르게 False 반환    
-    hero_pos = hero.get_center()
-
-    rel_list = []
-    
-    for d in wall.get_point_list() :
-        dist = math.dist(d, hero_pos) # 벽의 각 점이랑 hero 의 거리를 계산.
-        rel_list.append(  ((d[0] - hero_pos[0]) / dist , (d[1] - hero_pos[1]) / dist ) )  
-        # 상대적 위치를 미리 계산해서 처리해
-        if dist < hero.v_distance and dist != 0: 
-            default = True # 일단 점이 하나라도 있으면 처리되어야 하니까..
-        
-    if not default :
-        return default # 1차 거리 계산후에 해당하지 않는다면, 즉시 반환
-
-    
-    #  상대 적인 위치를 계산 한 후 상대 위치 저장
-    # rel_x = (d[0] - hero_pos[0]) / dist
-    # rel_y = (d[1] - hero_pos[1]) / dist
-
-    # 캐릭터가 바라보고 있는 방향에 대해서 단위 벡터 생성( sin^2 + cos^2 = 1 이니까 )
-    facing_x = math.cos(math.radians(hero.rotate-90)) # 정면을 0 이라고 해서 90도 보정
-    facing_y = math.sin(math.radians(hero.rotate-90))
-
-    # 상대적  위치랑 내 시야 랑 내적함
-    #dot = rel_x * facing_x + rel_y * facing_y
-    # dot를 개별 에서 전체 보유 리스트를 전부 체크 하고, 최댓값을 리턴 하도록 수정 한것
-    dot = max(list( map( lambda x : get_product(x,(facing_x,facing_y)) ,   rel_list ))) 
-    
-    # 그 값이 내 vision cos 값 보다 크면 시야 안에 있는거임
-    min_cos_val = math.cos(math.radians(hero.vision)) # cos(radians(60)) -> 0.5
+    return geometry.line_cross(a, b, c, d)
 
 
-    
-
-    return dot >= min_cos_val
-    
-def get_product(v1, v2) :
-    return v1[0]*v2[0] + v1[1]*v2[1]
-
-
-def check_hero_collect_position(hero,axis) :
-
-    closest_wall_list =[]
-
-    for wall in wall_list :
-        if find_col_wall(hero, wall,2) : # hero 반경 두배 범위 안의 벽만 찾고 싶어
-            closest_wall_list.append(wall)
-
-    if axis == 'x':
-        for wall in closest_wall_list :
-            # 일단 둘다 인 상황인데? x 제어
-            if find_col_wall(hero,wall): 
-                hero.x = hero.x_before
-                
-    else :
-        for wall in closest_wall_list :
-            # 일단 둘다 인 상황인데? y 제어
-            if find_col_wall(hero,wall): 
-                hero.y = hero.y_before
-                
-        
-            
-    
+def check_render_distance_walls(hero, wall):
+    # 벽의 샘플 점 중 하나라도 Hero 시야 안에 있으면 렌더링 대상으로 본다.
+    facing = geometry.facing_vector(hero.rotate)
+    return geometry.any_point_in_angle(
+        wall.get_points_array(),
+        hero.get_center(),
+        facing,
+        hero.v_distance,
+        hero.vision,
+    )
 
 
-def find_col_wall(hero, wall , radius_multiplier = 1) : 
-    
-    hero_pos = hero.get_center()
-    radius = hero.radius
-    
-    closest_point_x = 0
-
-    if hero_pos[0] <= min(wall.get_pos()[0], wall.get_posxy()[0])  :
-        closest_point_x = min(wall.get_pos()[0], wall.get_posxy()[0])
-    elif hero_pos[0] >= max(wall.get_pos()[0], wall.get_posxy()[0]) :
-        closest_point_x = max(wall.get_pos()[0], wall.get_posxy()[0])
-    else :
-        closest_point_x = hero_pos[0]
-
-    closest_point_y = 0 
-    
-    if hero_pos[1] <= min(wall.get_pos()[1], wall.get_posxy()[1])  :
-        closest_point_y = min(wall.get_pos()[1], wall.get_posxy()[1])
-    elif hero_pos[1] >= max(wall.get_pos()[1], wall.get_posxy()[1]) :
-        closest_point_y = max(wall.get_pos()[1], wall.get_posxy()[1])
-    else :
-        closest_point_y = hero_pos[1]
-
-    
-    # 제일 가까운 점 을 구했음
-
-    # 이제 이 점과 hero 의 중심사이의 거리가 math.dist(d, hero_pos) , radius 보다 작은지 보면됨
+def get_product(v1, v2):
+    return geometry.dot(v1, v2)
 
 
-    # 되긴 되는데, 특정 벽은 의도 한 대로 막히는데
-    # 또 어떤 벽은 의도대로 안막히는 사항이 있음. 이유가 뭘까? > 집에가서 추가 적인 고민을 해보자.
-    return math.dist((closest_point_x,closest_point_y), hero_pos) <= radius * radius_multiplier
+def check_hero_collect_position(obj, axis):
+    # 모든 벽을 정밀 검사하면 비싸므로, 반경 두 배 안쪽의 가까운 벽만 먼저 추린다.
+    closest_wall_list = [
+        wall for wall in wall_list if find_col_wall(obj, wall, radius_multiplier=2)
+    ]
 
-def move_enemy() :
-    global enemy_list
-    global hero
-    ## 전체 적 중에서, 히어로와 가까운 적만, 히어로 방향으로 이동 시킨 후 , 본인주변 벽과의 충돌 판정 계산
-    for enemy in enemy_list :
-        dist = math.dist(enemy.get_center(), hero.get_center())
-        if dist < hero.v_distance : # 히어로의 시야 범위 안쪽의 적만 해당
-            enemy.x_before = enemy.x # 이동 전 기존 위치
-            enemy.y_before = enemy.y # 이동 전 기존 위치
+    for wall in closest_wall_list:
+        if not find_col_wall(obj, wall):
+            continue
 
-            e_x_move = (hero.x - enemy.x) / dist # 정규화
-            e_y_move = (hero.y - enemy.y) / dist # 정규화 
-            
-            enemy.x += 1 * e_x_move
-                # hero x 랑 enemy x사이의 상대 벡터를 쪼개서 가져가면 되는거 아님? 
-            check_hero_collect_position(enemy,'x') 
-            # hero 와 enemy 의 충돌 체크
-            enemy.y += 1 * e_y_move
-            check_hero_collect_position(enemy,'y') 
-            
-            if check_circle_to_circle_coll(hero, enemy) :
-                enemy.x = enemy.x_before - e_x_move * 60 # 충돌 했다면 왔던 벡터 방향으로 튕겨 나가게
-                enemy.y = enemy.y_before - e_y_move * 60
-                hero.life_point -= 1
-        pass
-    pass
+        # 이동한 축만 되돌린다. 이렇게 하면 벽에 닿아도 다른 축 이동은 살아남는다.
+        if axis == "x":
+            obj.x = obj.x_before
+        else:
+            obj.y = obj.y_before
 
 
-def check_circle_to_circle_coll(c1, c2) :
-    return math.dist(c1.get_center(),c2.get_center()) <= c1.radius+c2.radius
+def find_col_wall(obj, wall, radius_multiplier=1):
+    # 원형 객체와 직사각형 벽의 충돌 판정.
+    # 내부 계산은 geometry에서 numpy 기반으로 처리한다.
+    return geometry.circle_intersects_rect(
+        obj.get_center(),
+        obj.radius,
+        wall.rect_min(),
+        wall.rect_max(),
+        radius_multiplier,
+    )
 
 
-def hero_attack() :
-    global enemy_list
-    # 공격하면 그냥 적을 없애 버려 일단
-    attack_list = [ enemy for enemy in enemy_list if check_render_object(hero,enemy) and is_enemey_inrange(hero,enemy) ]
+def check_circle_to_circle_coll(c1, c2):
+    return geometry.circle_intersects_circle(
+        c1.get_center(),
+        c1.radius,
+        c2.get_center(),
+        c2.radius,
+    )
 
-    for enemy in attack_list :
+
+def hero_attack():
+    # 공격 범위와 시야를 동시에 만족하는 적만 제거한다.
+    attack_list = [
+        enemy
+        for enemy in enemy_list
+        if check_render_object(hero, enemy) and is_enemey_inrange(hero, enemy)
+    ]
+
+    for enemy in attack_list:
         enemy.is_alive = False
-    # 렌더링 대상 적들 중에서 
 
 
+def is_enemey_inrange(hero, enemy):
+    # 공격 판정은 시야 판정보다 짧은 거리와 좁은 각도를 사용한다.
+    return geometry.target_in_angle(
+        hero.get_center(),
+        enemy.get_center(),
+        geometry.facing_vector(hero.rotate),
+        hero.attack_range,
+        hero.attack_rad,
+    )
 
-def is_enemey_inrange(hero, enemy) :
-#거리 체크 (이미 시야 거리 바깥이면 빠르게 False 반환)
-    enemy_pos = enemy.get_center()
-    hero_pos = hero.get_center()
-    
-    dist = math.dist(enemy_pos, hero_pos)
-    if dist > hero.attack_range or dist == 0:
-        return False
 
-    #  상대 적인 위치를 계산 한 후 상대 위치 저장
-    rel_x = (enemy_pos[0] - hero_pos[0]) / dist
-    rel_y = (enemy_pos[1] - hero_pos[1]) / dist
+def find_col(obj1, obj2):
+    # 사각형 충돌 함수.
+    obj1_x_end = obj1.x + obj1.width
+    obj2_x_end = obj2.x + obj2.width
+    obj1_y_end = obj1.y + obj1.height
+    obj2_y_end = obj2.y + obj2.height
 
-    # 캐릭터가 바라보고 있는 방향에 대해서 단위 벡터 생성( sin^2 + cos^2 = 1 이니까 )
-    facing_x = math.cos(math.radians(hero.rotate-90)) # 정면을 0 이라고 해서 90도 보정
-    facing_y = math.sin(math.radians(hero.rotate-90))
+    check_x = (obj1.x <= obj2_x_end) and (obj2.x <= obj1_x_end)
+    check_y = (obj1.y <= obj2_y_end) and (obj2.y <= obj1_y_end)
+    return not (check_x and check_y)
 
-    # 상대적  위치랑 내 시야 랑 내적함
-    dot = rel_x * facing_x + rel_y * facing_y
 
-    # attack_rad 와 비교
-    min_cos_val = math.cos(math.radians(hero.attack_rad)) # cos(radians(60)) -> 0.5
-
-    return dot >= min_cos_val
+def _resolve_dt(frame_dt):
+    # 새 루프에서는 dt를 넘기지만, 예전처럼 인자 없이 불러도 기본값으로 동작하게 한다.
+    return DEFAULT_DT if frame_dt is None else frame_dt
